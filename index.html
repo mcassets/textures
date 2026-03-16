@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Atlas Maker</title>
+
+<style>
+
+body{
+margin:0;
+font-family:Arial;
+background:#1e1e1e;
+color:white;
+}
+
+#popup{
+position:fixed;
+top:0;
+left:0;
+width:100%;
+height:100%;
+background:rgba(0,0,0,.85);
+display:flex;
+align-items:center;
+justify-content:center;
+z-index:999999;
+}
+
+#popupContent{
+background:#222;
+padding:20px;
+border:1px solid #444;
+min-width:300px;
+}
+
+.atlasItem{
+padding:6px;
+border-bottom:1px solid #444;
+cursor:pointer;
+}
+
+.atlasItem:hover{
+background:#333;
+}
+
+#topbar{
+display:flex;
+gap:10px;
+padding:10px;
+background:#111;
+align-items:center;
+flex-wrap:wrap;
+}
+
+input,button{
+background:#2a2a2a;
+color:white;
+border:1px solid #555;
+padding:6px;
+}
+
+button:hover{
+background:#3a3a3a;
+cursor:pointer;
+}
+
+#grid{
+display:grid;
+gap:2px;
+padding:10px;
+}
+
+.slot{
+width:40px;
+height:40px;
+background:#111;
+border:1px solid #444;
+position:relative;
+}
+
+.slot img{
+width:100%;
+height:100%;
+image-rendering:pixelated;
+}
+
+.index{
+position:absolute;
+bottom:0;
+right:2px;
+font-size:9px;
+color:#aaa;
+}
+
+#preview{
+margin:10px;
+border:2px solid #444;
+image-rendering:pixelated;
+}
+
+#sideList{
+position:fixed;
+right:0;
+top:70px;
+width:220px;
+height:calc(100% - 70px);
+overflow-y:auto;
+background:#111;
+border-left:2px solid #333;
+padding:6px;
+}
+
+.listItem{
+display:flex;
+align-items:center;
+gap:6px;
+background:#1e1e1e;
+border:1px solid #333;
+padding:4px;
+margin-bottom:4px;
+cursor:grab;
+}
+
+.listItem img{
+width:24px;
+height:24px;
+image-rendering:pixelated;
+border:1px solid #444;
+}
+
+.listItem input{
+width:80px;
+font-size:11px;
+}
+
+.deleteBtn{
+background:#500;
+border:none;
+color:white;
+padding:3px 6px;
+}
+
+</style>
+</head>
+
+<body>
+
+<div id="popup">
+<div id="popupContent">
+<h3>Choose Atlas</h3>
+<div id="atlasList"></div>
+<br>
+<button id="createAtlas">Create Atlas</button>
+</div>
+</div>
+
+<div id="topbar">
+
+<label>Name:</label>
+<input id="atlasName">
+
+<label>Image Size</label>
+<input id="imgSize" type="number" value="16" min="1">
+
+<label>Atlas Size</label>
+<input id="atlasX" type="number" value="16" min="1" style="width:60px">
+<span>x</span>
+<input id="atlasY" type="number" value="16" min="1" style="width:60px">
+
+<button id="addImg">Add Image</button>
+
+<button id="exportPNG" style="margin-left:auto;">Save PNG</button>
+<button id="exportJSON">Download JSON</button>
+
+<input type="file" id="fileInput" accept="image/*" hidden>
+
+</div>
+
+<div id="grid"></div>
+
+<canvas id="preview"></canvas>
+
+<div id="sideList"></div>
+
+<script>
+
+let atlasX=16
+let atlasY=16
+let TOTAL=atlasX*atlasY
+
+let atlasData=new Array(256).fill(null).map(()=>({img:null,name:""}))
+
+let atlasName=""
+let currentAtlasKey=""
+
+const grid=document.getElementById("grid")
+const preview=document.getElementById("preview")
+const ctx=preview.getContext("2d")
+
+const nameInput=document.getElementById("atlasName")
+const sizeInput=document.getElementById("imgSize")
+
+function buildGrid(){
+
+atlasX=parseInt(document.getElementById("atlasX").value)
+atlasY=parseInt(document.getElementById("atlasY").value)
+
+TOTAL=atlasX*atlasY
+
+grid.style.gridTemplateColumns=`repeat(${atlasX},40px)`
+grid.style.gridTemplateRows=`repeat(${atlasY},40px)`
+
+grid.innerHTML=""
+
+for(let i=0;i<TOTAL;i++){
+
+if(!atlasData[i]) atlasData[i]={img:null,name:""}
+
+let slot=document.createElement("div")
+slot.className="slot"
+
+let label=document.createElement("div")
+label.className="index"
+label.textContent=i
+
+slot.appendChild(label)
+
+grid.appendChild(slot)
+
+}
+
+}
+
+buildGrid()
+
+function drawPreview(){
+
+let tileSize=parseInt(sizeInput.value)
+
+preview.width=atlasX*tileSize
+preview.height=atlasY*tileSize
+
+ctx.clearRect(0,0,preview.width,preview.height)
+
+atlasData.forEach((item,i)=>{
+
+if(!item.img)return
+
+let img=new Image()
+
+img.onload=()=>{
+
+let x=i%atlasX
+let y=Math.floor(i/atlasX)
+
+ctx.drawImage(img,x*tileSize,y*tileSize,tileSize,tileSize)
+
+}
+
+img.src=item.img
+
+})
+
+}
+
+function updateGrid(){
+
+const slots=document.querySelectorAll(".slot")
+
+slots.forEach((slot,i)=>{
+
+slot.innerHTML=""
+
+let label=document.createElement("div")
+label.className="index"
+label.textContent=i
+
+slot.appendChild(label)
+
+if(atlasData[i] && atlasData[i].img){
+
+let img=document.createElement("img")
+img.src=atlasData[i].img
+slot.appendChild(img)
+
+}
+
+})
+
+drawPreview()
+buildSideList()
+saveAtlas()
+
+}
+
+function saveAtlas(){
+
+let data={
+name:atlasName,
+atlasX:atlasX,
+atlasY:atlasY,
+data:atlasData
+}
+
+localStorage.setItem(currentAtlasKey,JSON.stringify(data))
+
+}
+
+function loadAtlas(key){
+
+let obj=JSON.parse(localStorage.getItem(key))
+
+atlasName=obj.name
+atlasData=obj.data
+atlasX=obj.atlasX||16
+atlasY=obj.atlasY||16
+
+document.getElementById("atlasX").value=atlasX
+document.getElementById("atlasY").value=atlasY
+
+currentAtlasKey=key
+
+nameInput.value=atlasName
+
+buildGrid()
+updateGrid()
+
+document.getElementById("popup").style.display="none"
+
+}
+
+nameInput.addEventListener("input",()=>{
+atlasName=nameInput.value
+saveAtlas()
+})
+
+document.getElementById("addImg").onclick=()=>{
+document.getElementById("fileInput").click()
+}
+
+document.getElementById("fileInput").onchange=e=>{
+
+let file=e.target.files[0]
+if(!file)return
+
+let reader=new FileReader()
+
+reader.onload=function(){
+
+let img=new Image()
+
+img.onload=function(){
+
+let size=parseInt(sizeInput.value)
+
+let canvas=document.createElement("canvas")
+canvas.width=size
+canvas.height=size
+
+let c=canvas.getContext("2d")
+
+c.drawImage(img,0,0,size,size,0,0,size,size)
+
+let data=canvas.toDataURL()
+
+let index=atlasData.findIndex(v=>!v.img)
+
+if(index===-1)return
+
+atlasData[index].img=data
+atlasData[index].name="tile_"+index
+
+updateGrid()
+
+}
+
+img.src=reader.result
+
+}
+
+reader.readAsDataURL(file)
+
+}
+
+function buildSideList(){
+
+const list=document.getElementById("sideList")
+list.innerHTML=""
+
+atlasData.forEach((item,i)=>{
+
+if(!item || !item.img)return
+
+let div=document.createElement("div")
+div.className="listItem"
+div.draggable=true
+
+let preview=document.createElement("img")
+preview.src=item.img
+
+let index=document.createElement("span")
+index.textContent=i
+
+let name=document.createElement("input")
+name.value=item.name
+
+name.oninput=()=>{
+atlasData[i].name=name.value
+saveAtlas()
+}
+
+let del=document.createElement("button")
+del.textContent="X"
+del.className="deleteBtn"
+
+del.onclick=()=>{
+atlasData[i]={img:null,name:""}
+updateGrid()
+}
+
+div.append(preview,index,name,del)
+
+div.addEventListener("dragstart",e=>{
+e.dataTransfer.setData("text/plain",i)
+})
+
+div.addEventListener("dragover",e=>{
+e.preventDefault()
+})
+
+div.addEventListener("drop",e=>{
+
+let from=parseInt(e.dataTransfer.getData("text/plain"))
+let to=i
+
+let temp=atlasData[from]
+atlasData[from]=atlasData[to]
+atlasData[to]=temp
+
+updateGrid()
+
+})
+
+list.appendChild(div)
+
+})
+
+}
+
+function exportPNG(){
+
+let tileSize=parseInt(sizeInput.value)
+
+let canvas=document.createElement("canvas")
+canvas.width=atlasX*tileSize
+canvas.height=atlasY*tileSize
+
+let c=canvas.getContext("2d")
+
+atlasData.forEach((item,i)=>{
+
+if(!item.img)return
+
+let img=new Image()
+
+img.onload=()=>{
+
+let x=i%atlasX
+let y=Math.floor(i/atlasX)
+
+c.drawImage(img,x*tileSize,y*tileSize,tileSize,tileSize)
+
+}
+
+img.src=item.img
+
+})
+
+setTimeout(()=>{
+
+let link=document.createElement("a")
+link.download="atlas.png"
+link.href=canvas.toDataURL("image/png")
+link.click()
+
+saveAtlas()
+
+},200)
+
+}
+
+function exportJSON(){
+
+let exportData={
+name:atlasName,
+tileSize:parseInt(sizeInput.value),
+atlasWidth:atlasX,
+atlasHeight:atlasY,
+tiles:[]
+}
+
+atlasData.forEach((tile,index)=>{
+
+if(!tile.img) return
+
+exportData.tiles.push({
+index:index,
+name:tile.name
+})
+
+})
+
+let blob=new Blob(
+[JSON.stringify(exportData,null,2)],
+{type:"application/json"}
+)
+
+let link=document.createElement("a")
+link.href=URL.createObjectURL(blob)
+link.download=(atlasName||"atlas")+".json"
+
+link.click()
+
+saveAtlas()
+
+}
+
+document.getElementById("exportPNG").onclick=exportPNG
+document.getElementById("exportJSON").onclick=exportJSON
+
+document.addEventListener("keydown",e=>{
+
+if(e.ctrlKey && e.shiftKey && e.key.toLowerCase()=="s"){
+e.preventDefault()
+exportPNG()
+}
+
+if(e.ctrlKey && e.shiftKey && e.key.toLowerCase()=="j"){
+e.preventDefault()
+exportJSON()
+}
+
+})
+
+sizeInput.oninput=()=>{
+drawPreview()
+saveAtlas()
+}
+
+document.getElementById("atlasX").oninput=()=>{
+buildGrid()
+updateGrid()
+}
+
+document.getElementById("atlasY").oninput=()=>{
+buildGrid()
+updateGrid()
+}
+
+function loadAtlasList(){
+
+let list=document.getElementById("atlasList")
+list.innerHTML=""
+
+Object.keys(localStorage).forEach(key=>{
+
+if(!key.startsWith("atlas_"))return
+
+let item=document.createElement("div")
+item.className="atlasItem"
+
+let obj=JSON.parse(localStorage.getItem(key))
+
+item.textContent=obj.name
+
+item.onclick=()=>loadAtlas(key)
+
+list.appendChild(item)
+
+})
+
+}
+
+document.getElementById("createAtlas").onclick=()=>{
+
+let key="atlas_"+Date.now()
+
+let obj={
+name:"New Atlas",
+atlasX:16,
+atlasY:16,
+data:new Array(256).fill(null).map(()=>({img:null,name:""}))
+}
+
+localStorage.setItem(key,JSON.stringify(obj))
+
+loadAtlasList()
+
+}
+
+loadAtlasList()
+
+</script>
+
+</body>
+</html>
